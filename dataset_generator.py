@@ -68,7 +68,7 @@ columns = ["date", "leetcode", "capstone", "projects", "misc",
 
 df = pd.DataFrame(data, columns=columns)
 
-# Save
+
 df.to_csv("habit_tracking_synthetic.csv", index=False)
 
 print("✅ Synthetic dataset generated: habit_tracking_synthetic.csv")
