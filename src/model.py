@@ -5,11 +5,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from xgboost import XGBRegressor, plot_importance
 import shap
+import joblib   # 🔹 NEW
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Load & Prepare Data
-
 from config import DATA_PATH
 df = pd.read_csv(DATA_PATH)
 
@@ -25,9 +25,7 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-
 # Train XGBoost Model
-
 model = XGBRegressor(
     n_estimators=300,
     learning_rate=0.05,
@@ -39,11 +37,12 @@ model = XGBRegressor(
 
 model.fit(X_train, y_train)
 
+# 🔹 Save model
+joblib.dump(model, "src/models/xgb_model.pkl")
+print(" Model saved at src/models/xgb_model.pkl")
 
 # Evaluate Performance
-
 y_pred = model.predict(X_test)
-
 rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 r2 = r2_score(y_test, y_pred)
 
@@ -51,21 +50,21 @@ print("XGBoost Model Performance:")
 print(f"RMSE: {rmse:.2f}")
 print(f"R²: {r2:.2f}")
 
-
 # XGBoost Feature Importance
-
 plt.figure(figsize=(8, 5))
 plot_importance(model, importance_type="weight")
 plt.title("Feature Importance (XGBoost)")
 plt.show()
 
-
 # SHAP Explainability
-
 print("\nGenerating SHAP explanations...")
 
 # 1. Initialize SHAP explainer
 explainer = shap.Explainer(model, X_train)
+
+# 🔹 Save SHAP explainer
+joblib.dump(explainer, "src/models/shap_explainer.pkl")
+print(" SHAP explainer saved at src/models/shap_explainer.pkl")
 
 # 2. Compute SHAP values for the test set
 shap_values = explainer(X_test)
@@ -73,7 +72,7 @@ shap_values = explainer(X_test)
 # 3. Global Feature Importance (SHAP bar plot)
 shap.summary_plot(shap_values, X_test, plot_type="bar")
 
-# 4. Feature effect distribution (red=high value, blue=low value)
+# 4. Feature effect distribution
 shap.summary_plot(shap_values, X_test)
 
 # 5. Local explanation for the first test sample
