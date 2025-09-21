@@ -47,21 +47,64 @@ def healthcheck():
 
 # --- Predict (daily log) ---
 @app.post("/predict")
-def predict(log: HabitLog):
-    input_df = pd.DataFrame([log.dict()])
-    prediction = model.predict(input_df)[0]
+def predict(habit: HabitLog):
+    input_data = habit.dict()
 
-    shap_values = explainer(input_df)
-    feature_contribs = dict(zip(input_df.columns, shap_values.values[0].tolist()))
+    # Make prediction
+    df_input = pd.DataFrame([input_data])
+    prediction = model.predict(df_input)[0]
 
-    top_factors = sorted(feature_contribs.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
-    insights = [f"{feat} contributed {round(val,3)}" for feat, val in top_factors]
+    # Compute SHAP values
+    shap_values = explainer(df_input)
+    feature_contribs = dict(zip(input_data.keys(), shap_values.values[0]))
+
+    # Feature directions (which side is good)
+    feature_directions = {
+        "sleep_hours": "higher is better",
+        "sleep_quality": "higher is better",
+        "energy": "higher is better",
+        "mood": "higher is better",
+        "leetcode": "higher is better",
+        "capstone": "higher is better",
+        "projects": "higher is better",
+        "misc": "higher is better",
+        "stress": "lower is better"
+    }
+
+    # Sort contributions
+    sorted_contribs = sorted(feature_contribs.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    # Take top 3 impactful features
+    top_factors = sorted_contribs[:3]
+    positives, negatives = [], []
+
+    for feat, val in top_factors:
+        direction = feature_directions.get(feat, "higher is better")
+        feat_name = feat.replace("_", " ")
+
+        # Positive influence
+        if (val > 0 and direction == "higher is better") or (val < 0 and direction == "lower is better"):
+            positives.append(feat_name)
+        # Negative influence
+        else:
+            negatives.append(feat_name)
+
+    # Build human-readable sentence
+    sentence = ""
+    if positives:
+        sentence += "Your productivity increased because " + " and ".join(positives) + " were strong. "
+    if negatives:
+        if positives:
+            sentence += "However, it dropped a bit due to " + " and ".join(negatives) + "."
+        else:
+            sentence += "Your productivity dropped due to " + " and ".join(negatives) + "."
 
     return {
         "predicted_productivity": float(prediction),
         "shap_explanation": feature_contribs,
-        "insights": insights
+        "insights": [sentence.strip()]
     }
+
 
 
 # --- Upload CSV (batch analysis) ---
