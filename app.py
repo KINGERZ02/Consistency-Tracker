@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import pandas as pd
+import shap
+import numpy as np
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -9,6 +11,11 @@ st.title("🔥Consistency Tracker")
 
 # Tabs for sections
 tabs = st.tabs(["Daily Log", "Dataset Insights", "Global SHAP"])
+
+# ---------------- DAILY LOG ----------------
+import numpy as np
+import shap
+import matplotlib.pyplot as plt
 
 # ---------------- DAILY LOG ----------------
 with tabs[0]:
@@ -49,74 +56,56 @@ with tabs[0]:
                 result = response.json()
 
                 # Prediction
-                st.success(f"Predicted Productivity: {round(result['predicted_productivity'], 2)}")
+                prediction = result['predicted_productivity']
+                st.success(f"Predicted Productivity: {round(prediction, 2)}")
 
-                # Top 3 SHAP insights (text bullets)
+                # Motivational Insight
                 if result.get("insights"):
-                    st.subheader("Insights")
+                    st.subheader("Coach's Insight")
                     for insight in result["insights"]:
-                        st.write(f"- {insight}")
+                        st.write(insight)
 
-                # Full SHAP explanation (table)
+                # Waterfall Plot (Visual SHAP)
                 if result.get("shap_explanation"):
-                    st.subheader("All Feature Contributions (SHAP)")
-                    factors_df = pd.DataFrame(result["shap_explanation"], index=[0]).T
-                    factors_df.columns = ["SHAP Value"]
-                    st.dataframe(factors_df.sort_values("SHAP Value", key=abs, ascending=False))
+                    st.subheader("Visual Explanation (Waterfall)")
+
+                    values = np.array(list(result["shap_explanation"].values()))
+                    features = list(result["shap_explanation"].keys())
+                    base_value = prediction - np.sum(values)
+
+                    shap_values = shap.Explanation(
+                        values=values,
+                        base_values=base_value,
+                        data=features
+                    )
+
+                    # Create matplotlib figure for Streamlit
+                    fig, ax = plt.subplots(figsize=(8, 5))
+
+                    # Transparent floating background
+                    fig.patch.set_alpha(0.0)
+                    ax.set_facecolor("none")
+
+                    # Waterfall plot
+                    shap.plots.waterfall(shap_values, show=False)
+
+                    # Apply fire palette colors
+                    for patch, val in zip(ax.patches, values):
+                        patch.set_color("#FF6B00" if val > 0 else "#333333")
+
+                    # Remove clutter
+                    for txt in ax.texts:
+                        txt.set_visible(False)
+                    ax.grid(False)
+                    for spine in ax.spines.values():
+                        spine.set_visible(False)
+
+                    st.pyplot(fig, transparent=True)
 
             else:
                 st.error(f"API Error: {response.status_code}")
         except Exception as e:
             st.error(f"Connection failed: {e}")
-
-
-# ---------------- DATASET INSIGHTS ----------------
-with tabs[1]:
-    st.header("Dataset Insights")
-
-    uploaded_file = st.file_uploader("Upload your habit dataset (CSV)", type=["csv"])
-    if uploaded_file is not None:
-        try:
-            files = {"file": uploaded_file.getvalue()}
-            response = requests.post(f"{API_URL}/upload_csv", files={"file": uploaded_file})
-            if response.status_code == 200:
-                result = response.json()
-                st.success("File uploaded successfully!")
-                st.json(result)
-            else:
-                st.error(f"Upload failed: {response.status_code}")
-        except Exception as e:
-            st.error(f"Upload failed: {e}")
-
-        # Call summary
-        st.subheader("Summary")
-        try:
-            res = requests.get(f"{API_URL}/get_summary")
-            st.json(res.json())
-        except:
-            st.warning("Could not fetch summary.")
-
-        # Call weekly
-        st.subheader("Weekly Averages")
-        try:
-            res = requests.get(f"{API_URL}/get_weekly")
-            weekly_data = res.json().get("weekly_average_productivity", {})
-            if weekly_data:
-                df_weekly = pd.DataFrame.from_dict(weekly_data, orient="index", columns=["Avg Productivity"])
-                st.bar_chart(df_weekly)
-                st.dataframe(df_weekly)
-            else:
-                st.json(res.json())
-        except:
-            st.warning("Could not fetch weekly averages.")
-
-        # Call streaks
-        st.subheader("Streaks")
-        try:
-            res = requests.get(f"{API_URL}/get_streaks")
-            st.json(res.json())
-        except:
-            st.warning("Could not fetch streak info.")
 
 
 # ---------------- GLOBAL SHAP ----------------

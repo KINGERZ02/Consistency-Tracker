@@ -49,62 +49,71 @@ def healthcheck():
 @app.post("/predict")
 def predict(habit: HabitLog):
     input_data = habit.dict()
+    df_input = pd.DataFrame([input_data])
 
     # Make prediction
-    df_input = pd.DataFrame([input_data])
     prediction = model.predict(df_input)[0]
+
+    # Check if no work was done
+    no_work = all(input_data[task] == 0 for task in ["leetcode", "capstone", "projects", "misc"])
 
     # Compute SHAP values
     shap_values = explainer(df_input)
     feature_contribs = dict(zip(input_data.keys(), shap_values.values[0]))
 
-    # Feature directions (which side is good)
-    feature_directions = {
-        "sleep_hours": "higher is better",
-        "sleep_quality": "higher is better",
-        "energy": "higher is better",
-        "mood": "higher is better",
-        "leetcode": "higher is better",
-        "capstone": "higher is better",
-        "projects": "higher is better",
-        "misc": "higher is better",
-        "stress": "lower is better"
-    }
+    insights = []
 
-    # Sort contributions
-    sorted_contribs = sorted(feature_contribs.items(), key=lambda x: abs(x[1]), reverse=True)
+    if no_work:
+        # Special motivational case for no work
+        insights.append(
+            "You didn’t complete any tasks today, so productivity stayed minimal. "
+            "But you managed good sleep and energy!! that’s a strong base. "
+            "Tomorrow, try adding even one task to keep the momentum going."
+        )
+    else:
+        # Normal SHAP-based reflection + motivation
+        feature_directions = {
+            "sleep_hours": "higher is better",
+            "sleep_quality": "higher is better",
+            "energy": "higher is better",
+            "mood": "higher is better",
+            "leetcode": "higher is better",
+            "capstone": "higher is better",
+            "projects": "higher is better",
+            "misc": "higher is better",
+            "stress": "lower is better"
+        }
 
-    # Take top 3 impactful features
-    top_factors = sorted_contribs[:3]
-    positives, negatives = [], []
+        sorted_contribs = sorted(feature_contribs.items(), key=lambda x: abs(x[1]), reverse=True)
+        top_factors = sorted_contribs[:3]
 
-    for feat, val in top_factors:
-        direction = feature_directions.get(feat, "higher is better")
-        feat_name = feat.replace("_", " ")
+        positives, negatives = [], []
+        for feat, val in top_factors:
+            direction = feature_directions.get(feat, "higher is better")
+            feat_name = feat.replace("_", " ")
 
-        # Positive influence
-        if (val > 0 and direction == "higher is better") or (val < 0 and direction == "lower is better"):
-            positives.append(feat_name)
-        # Negative influence
-        else:
-            negatives.append(feat_name)
+            if (val > 0 and direction == "higher is better") or (val < 0 and direction == "lower is better"):
+                positives.append(feat_name)
+            else:
+                negatives.append(feat_name)
 
-    # Build human-readable sentence
-    sentence = ""
-    if positives:
-        sentence += "Your productivity increased because " + " and ".join(positives) + " were strong. "
-    if negatives:
+        # Build motivational sentence
+        sentence = ""
         if positives:
-            sentence += "However, it dropped a bit due to " + " and ".join(negatives) + "."
-        else:
-            sentence += "Your productivity dropped due to " + " and ".join(negatives) + "."
+            sentence += "Great job!! " + " and ".join(positives) + " boosted your productivity today. "
+        if negatives:
+            if positives:
+                sentence += "But " + " and ".join(negatives) + " held you back a little. "
+            else:
+                sentence += "Productivity dipped mainly due to " + " and ".join(negatives) + ". "
+        sentence += "Keep building consistency!! even small steps daily will compound!"
+        insights.append(sentence.strip())
 
     return {
         "predicted_productivity": float(prediction),
         "shap_explanation": feature_contribs,
-        "insights": [sentence.strip()]
+        "insights": insights
     }
-
 
 
 # --- Upload CSV (batch analysis) ---
