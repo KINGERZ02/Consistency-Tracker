@@ -202,31 +202,41 @@ def get_streaks():
 
 
 # --- Get Top Features ---
-@app.get("/get_top_features")
-def get_top_features():
+@app.get("/get_global_shap")
+def get_global_shap(sample_size: int = 200):
     global uploaded_df
     if uploaded_df is None:
         return {"error": "No data uploaded yet. Please upload a CSV first."}
 
-    # Only keep feature columns for SHAP
     feature_cols = ["leetcode","capstone","projects","misc",
                     "sleep_hours","sleep_quality","mood","stress",
                     "energy","weekday"]
 
-    sample_df = uploaded_df[feature_cols].sample(min(50, len(uploaded_df)))
+    # Subsample for performance
+    n_rows = min(sample_size, len(uploaded_df))
+    sample_df = uploaded_df[feature_cols].sample(n_rows, random_state=42)
+
+    # Ensure explainer works
     shap_values = explainer(sample_df)
+    shap_arr = shap_values.values
 
-    feature_importance = dict(
-        zip(feature_cols, abs(shap_values.values).mean(0).tolist())
-    )
+    if shap_arr is None or shap_arr.sum() == 0:
+        return {"error": "⚠️ SHAP values came out empty. Check explainer setup."}
 
-    # Sort and cast to Python float
-    top_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:5]
+    # Global importance
+    mean_abs = abs(shap_arr).mean(axis=0)
+    feature_importance = [
+        {"feature": f, "importance": float(round(v, 4))}
+        for f, v in zip(feature_cols, mean_abs)
+    ]
+    feature_importance = sorted(feature_importance, key=lambda x: x["importance"], reverse=True)
 
     return {
-        "top_features": [
-            {"feature": feat, "importance": float(round(val, 3))} for feat, val in top_features
-        ]
+        "feature_importance": feature_importance,
+        "shap_sample": {
+            feature_cols[i]: shap_arr[:, i].tolist()
+            for i in range(len(feature_cols))
+        },
+        "base_value": float(getattr(shap_values, "base_values", 0))
     }
-
 

@@ -116,12 +116,31 @@ with tabs[1]:
 
     st.header("Dataset Insights")
 
+    # --- Helper: Calculate streaks locally ---
+    def calculate_streaks(series, threshold=7):
+        streaks = (series >= threshold).astype(int)
+        longest = 0
+        current = 0
+        temp = 0
+        for val in streaks:
+            if val == 1:
+                temp += 1
+                longest = max(longest, temp)
+            else:
+                temp = 0
+        current = 0
+        for val in reversed(streaks):
+            if val == 1:
+                current += 1
+            else:
+                break
+        return current, longest
+
     uploaded_file = st.file_uploader("Upload your habit dataset (CSV)", type=["csv"])
     if uploaded_file is not None:
-        # show filename
         st.markdown(f"**File:** {uploaded_file.name}")
 
-        # 1) POST file to backend /upload_csv
+        # Send file to backend
         try:
             files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
             resp = requests.post(f"{API_URL}/upload_csv", files=files, timeout=60)
@@ -137,12 +156,7 @@ with tabs[1]:
         else:
             upload_info = resp.json()
 
-            # --- KPIs Row ---
-            cols = st.columns(3)
-            cols[0].metric("Rows", int(upload_info.get("rows_loaded", 0)))
-            cols[1].metric("Avg Actual Prod", float(upload_info.get("average_actual_productivity", 0)))
-            cols[2].metric("Avg Predicted Prod", float(upload_info.get("average_predicted_productivity", 0)))
-
+            
             # --- Calendar Streak Tracker ---
             st.subheader("🔥 Calendar Streak Tracker (last 3 months)")
             try:
@@ -156,7 +170,7 @@ with tabs[1]:
                     three_months_back = last_date - pd.DateOffset(months=3)
                     prod_series = prod_series[prod_series.index >= three_months_back]
 
-                    fig, ax = calplot.calplot(
+                    fig, axes = calplot.calplot(
                         prod_series,
                         cmap="Oranges",
                         edgecolor="#888888",
@@ -164,6 +178,24 @@ with tabs[1]:
                         linewidth=0.5,
                         fillcolor="black"  # blank days = black
                     )
+
+                    # Recolor all text/ticks grey
+                    if isinstance(axes, np.ndarray):
+                        axs = axes.flatten()
+                    else:
+                        axs = [axes]
+                    for ax in axs:
+                        for text in ax.texts:
+                            text.set_color("#888888")
+                        ax.tick_params(colors="#888888")
+                        if ax.yaxis.label: ax.yaxis.label.set_color("#888888")
+                        if ax.xaxis.label: ax.xaxis.label.set_color("#888888")
+                    if fig.axes:
+                        for a in fig.axes:
+                            a.tick_params(colors="#888888")
+                            if a.yaxis.label: a.yaxis.label.set_color("#888888")
+                            if a.xaxis.label: a.xaxis.label.set_color("#888888")
+
                     st.pyplot(fig, transparent=True)
             except Exception as e:
                 st.warning(f"Could not generate calendar: {e}")
@@ -187,7 +219,7 @@ with tabs[1]:
 
             st.markdown("---")
 
-            # --- Daily productivity time series ---
+            # --- Daily Productivity Time Series ---
             st.subheader("Daily Productivity (actual)")
             if "daily_productivity" in local_df.columns and "date" in local_df.columns:
                 ts_df = local_df.sort_values("date")
@@ -204,7 +236,7 @@ with tabs[1]:
 
             st.markdown("---")
 
-            # --- Weekly actual vs predicted ---
+            # --- Weekly Actual vs Predicted ---
             st.subheader("Weekly Averages (actual vs predicted)")
             try:
                 w = requests.get(f"{API_URL}/get_weekly", timeout=20)
@@ -245,33 +277,93 @@ with tabs[1]:
 
             st.markdown("---")
 
-            # --- Streaks (backend + strip visualization) ---
+            # --- Streaks (local calculation) ---
             st.subheader("Streaks")
             try:
-                r = requests.get(f"{API_URL}/get_streaks", timeout=20)
-                streak_info = r.json()
+                thr = 7
+                if "daily_productivity" in local_df.columns:
+                    series = local_df["daily_productivity"]
+                    current_streak, longest_streak = calculate_streaks(series, thr)
 
-                # Display key streak stats as metrics
-                cols = st.columns(3)
-                cols[0].metric("🔥 Current Streak", streak_info.get("current_streak", 0))
-                cols[1].metric("🏆 Longest Streak", streak_info.get("longest_streak", 0))
-                cols[2].metric("Threshold", streak_info.get("threshold", 7))
+                    cols = st.columns(3)
+                    cols[0].metric("🔥 Current Streak", current_streak)
+                    cols[1].metric("🏆 Longest Streak", longest_streak)
+                    cols[2].metric("Threshold", thr)
 
-                # Boolean streak strip visualization
-                thr = streak_info.get("threshold", 7)
-                bool_series = (local_df["daily_productivity"] >= thr).astype(int).reset_index(drop=True)
-                fig, ax = plt.subplots(figsize=(10,1.2))
-                fig.patch.set_alpha(0.0)
-                ax.set_facecolor("none")
-                ax.imshow([bool_series.values], aspect="auto", cmap=plt.get_cmap("Oranges"))
-
-                # Remove ticks and spines, grey styling
-                ax.set_yticks([])
-                ax.set_xticks([])
-                ax.tick_params(colors="#888888")
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
-
-                st.pyplot(fig, transparent=True)
+                    bool_series = (series >= thr).astype(int).reset_index(drop=True)
+                    fig, ax = plt.subplots(figsize=(10,1.2))
+                    fig.patch.set_alpha(0.0)
+                    ax.set_facecolor("none")
+                    ax.imshow([bool_series.values], aspect="auto", cmap=plt.get_cmap("Oranges"))
+                    ax.set_yticks([])
+                    ax.set_xticks([])
+                    ax.tick_params(colors="#888888")
+                    for spine in ax.spines.values():
+                        spine.set_visible(False)
+                    st.pyplot(fig, transparent=True)
             except Exception as e:
-                st.warning(f"Could not fetch streaks: {e}")
+                st.warning(f"Could not compute streaks: {e}")
+
+# ---------------- GLOBAL SHAP ----------------
+import streamlit as st
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- Global SHAP tab ---
+def global_shap_tab():
+    st.subheader("🌍 Global SHAP Insights")
+
+    # Call FastAPI
+    try:
+        resp = requests.get("http://localhost:8000/get_global_shap")  # change if deployed
+        data = resp.json()
+    except Exception as e:
+        st.error(f"❌ Could not fetch SHAP data: {e}")
+        return
+
+    if "error" in data:
+        st.warning(data["error"])
+        return
+
+    # --- Feature Importance (Bar Plot) ---
+    st.markdown("#### 🔥 Feature Importance (mean |SHAP|)")
+    fi_df = pd.DataFrame(data["feature_importance"])
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    sns.barplot(
+        data=fi_df,
+        x="importance", y="feature",
+        ax=ax, palette=["#FF6600"] * len(fi_df)  # fire orange
+    )
+    ax.set_xlabel("Mean |SHAP Value|", color="#888888")
+    ax.set_ylabel("Feature", color="#888888")
+    ax.tick_params(colors="#888888")
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#888888")
+    st.pyplot(fig)
+
+    # --- Beeswarm Plot ---
+    st.markdown("#### 🐝 Beeswarm Distribution (SHAP effects)")
+    shap_sample = pd.DataFrame(data["shap_sample"])
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.stripplot(
+        data=shap_sample,
+        orient="h",
+        size=4,
+        palette=["#FF6600"],
+        alpha=0.6
+    )
+    ax.set_xlabel("SHAP Value (Impact on Productivity)", color="#888888")
+    ax.set_ylabel("Features", color="#888888")
+    ax.set_yticks(range(len(shap_sample.columns)))
+    ax.set_yticklabels(shap_sample.columns, color="#888888")
+    ax.tick_params(colors="#888888")
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#888888")
+    st.pyplot(fig)
+
+    st.info("Orange → stronger influence. Values spread left/right → how each feature pushes productivity up/down.")
+
