@@ -2,22 +2,33 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
+import shap
+import numpy as np
 
 # --- Init app ---
 app = FastAPI(title="Consistency Tracker API")
 
-# --- Load model + SHAP explainer ---
+# --- Load model ---
 MODEL_PATH = "src/models/xgb_model.pkl"
 EXPLAINER_PATH = "src/models/shap_explainer.pkl"
 
+# Try loading model
 try:
     model = joblib.load(MODEL_PATH)
-    explainer = joblib.load(EXPLAINER_PATH)
 except Exception as e:
-    raise RuntimeError(f"❌ Could not load model/explainer: {e}")
+    raise RuntimeError(f"❌ Could not load model: {e}")
+
+# Try loading explainer, else build a new one
+try:
+    explainer = joblib.load(EXPLAINER_PATH)
+    print("✅ Loaded saved SHAP explainer")
+except Exception as e:
+    print(f"⚠️ Could not load saved explainer ({e}), building new TreeExplainer...")
+    explainer = shap.TreeExplainer(model)
 
 # --- Store uploaded data globally (for summary endpoints) ---
 uploaded_df = None
+
 
 # --- Schema for daily log ---
 class HabitLog(BaseModel):
@@ -208,35 +219,54 @@ def get_global_shap(sample_size: int = 200):
     if uploaded_df is None:
         return {"error": "No data uploaded yet. Please upload a CSV first."}
 
-    feature_cols = ["leetcode","capstone","projects","misc",
-                    "sleep_hours","sleep_quality","mood","stress",
-                    "energy","weekday"]
+    try:
+        feature_cols = ["leetcode","capstone","projects","misc",
+                        "sleep_hours","sleep_quality","mood","stress",
+                        "energy","weekday"]
 
-    # Subsample for performance
-    n_rows = min(sample_size, len(uploaded_df))
-    sample_df = uploaded_df[feature_cols].sample(n_rows, random_state=42)
+        # Subsample for performance
+        n_rows = min(sample_size, len(uploaded_df))
+        sample_df = uploaded_df[feature_cols].sample(n_rows, random_state=42)
 
-    # Ensure explainer works
-    shap_values = explainer(sample_df)
-    shap_arr = shap_values.values
+        # Compute SHAP values
+        shap_values = explainer(sample_df)
 
-    if shap_arr is None or shap_arr.sum() == 0:
-        return {"error": "⚠️ SHAP values came out empty. Check explainer setup."}
+        # Defensive handling for different SHAP versions
+        shap_arr = getattr(shap_values, "values", None)
+        if shap_arr is None:
+            shap_arr = shap_values  # some versions return ndarray directly
 
-    # Global importance
-    mean_abs = abs(shap_arr).mean(axis=0)
-    feature_importance = [
-        {"feature": f, "importance": float(round(v, 4))}
-        for f, v in zip(feature_cols, mean_abs)
-    ]
-    feature_importance = sorted(feature_importance, key=lambda x: x["importance"], reverse=True)
+        shap_arr = np.array(shap_arr)
 
-    return {
-        "feature_importance": feature_importance,
-        "shap_sample": {
-            feature_cols[i]: shap_arr[:, i].tolist()
-            for i in range(len(feature_cols))
-        },
-        "base_value": float(getattr(shap_values, "base_values", 0))
-    }
+        # If still invalid
+        if shap_arr.size == 0:
+            return {"error": "⚠️ SHAP values came out empty. Check explainer setup."}
 
+        # Global importance
+        mean_abs = np.abs(shap_arr).mean(axis=0)
+        feature_importance = [
+            {"feature": f, "importance": float(round(v, 4))}
+            for f, v in zip(feature_cols, mean_abs)
+        ]
+        feature_importance = sorted(feature_importance, key=lambda x: x["importance"], reverse=True)
+
+        # Handle base_value safely
+        base_value = shap_values.base_values
+        if isinstance(base_value, (list, np.ndarray)):
+            base_value = float(np.mean(base_value))
+        else:
+            base_value = float(base_value)
+
+        return {
+            "feature_importance": feature_importance,
+            "shap_sample": {
+                feature_cols[i]: shap_arr[:, i].tolist()
+                for i in range(len(feature_cols))
+            },
+            "base_value": base_value
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Global SHAP computation failed: {e}"}

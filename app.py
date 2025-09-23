@@ -3,6 +3,8 @@ import requests
 import pandas as pd
 import shap
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -55,57 +57,63 @@ with tabs[0]:
             if response.status_code == 200:
                 result = response.json()
 
-                # Prediction
+                # ---------------- Prediction Metric ----------------
                 prediction = result['predicted_productivity']
-                st.success(f"Predicted Productivity: {round(prediction, 2)}")
+                st.subheader("📊 Predicted Productivity")
+                cols = st.columns(1)
+                cols[0].metric("Score", round(prediction, 2))
 
-                # Motivational Insight
+                st.markdown("---")
+
+                # ---------------- Motivational Insight ----------------
                 if result.get("insights"):
-                    st.subheader("Coach's Insight")
+                    st.subheader("💡 Coach's Insight")
                     for insight in result["insights"]:
-                        st.write(insight)
+                        st.info(insight)
 
-                # Waterfall Plot (Visual SHAP)
+                st.markdown("---")
+
+                # ---------------- SHAP Feature Contributions ----------------
                 if result.get("shap_explanation"):
-                    st.subheader("Visual Explanation (Waterfall)")
+                    st.subheader("🔥 Key Feature Contributions")
 
                     values = np.array(list(result["shap_explanation"].values()))
                     features = list(result["shap_explanation"].keys())
-                    base_value = prediction - np.sum(values)
 
-                    shap_values = shap.Explanation(
-                        values=values,
-                        base_values=base_value,
-                        data=features
-                    )
+                    # Build dataframe for plotting
+                    shap_df = pd.DataFrame({
+                        "feature": features,
+                        "contribution": values
+                    }).sort_values("contribution", key=abs, ascending=True)
 
-                    # Create matplotlib figure for Streamlit
-                    fig, ax = plt.subplots(figsize=(8, 5))
-
-                    # Transparent floating background
+                    # Horizontal bar chart (resized for compact view)
+                    fig, ax = plt.subplots(figsize=(7, 3.5))
                     fig.patch.set_alpha(0.0)
                     ax.set_facecolor("none")
 
-                    # Waterfall plot
-                    shap.plots.waterfall(shap_values, show=False)
+                    colors = ["#FF6600" if v > 0 else "#888888" for v in shap_df["contribution"]]
+                    ax.barh(shap_df["feature"], shap_df["contribution"], color=colors)
 
-                    # Apply fire palette colors
-                    for patch, val in zip(ax.patches, values):
-                        patch.set_color("#FF6B00" if val > 0 else "#333333")
-
-                    # Remove clutter
-                    for txt in ax.texts:
-                        txt.set_visible(False)
-                    ax.grid(False)
+                    ax.set_xlabel("Impact on Productivity", color="#888888")
+                    ax.tick_params(colors="#888888")
                     for spine in ax.spines.values():
                         spine.set_visible(False)
 
                     st.pyplot(fig, transparent=True)
 
+                    # ---------------- Top 3 Drivers ----------------
+                    top3 = shap_df.reindex(shap_df["contribution"].abs().sort_values(ascending=False).index).head(3)
+                    st.subheader("🏆 Today’s Key Drivers")
+                    for _, row in top3.iterrows():
+                        sign = "⬆️ Boost" if row["contribution"] > 0 else "⬇️ Drag"
+                        color = "#FF6600" if row["contribution"] > 0 else "#888888"
+                        st.markdown(f"- <span style='color:{color}'>{row['feature'].replace('_',' ').title()}</span>: {sign}", unsafe_allow_html=True)
+
             else:
                 st.error(f"API Error: {response.status_code}")
         except Exception as e:
             st.error(f"Connection failed: {e}")
+
 
 # ---------------- DATASET INSIGHTS ----------------
 with tabs[1]:
@@ -305,65 +313,78 @@ with tabs[1]:
                 st.warning(f"Could not compute streaks: {e}")
 
 # ---------------- GLOBAL SHAP ----------------
-import streamlit as st
-import requests
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+with tabs[2]:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from matplotlib.colors import LinearSegmentedColormap
 
-# --- Global SHAP tab ---
-def global_shap_tab():
-    st.subheader("🌍 Global SHAP Insights")
+    st.header("🌍 Global SHAP Insights")
 
-    # Call FastAPI
+    # --- Fetch data from API ---
     try:
-        resp = requests.get("http://localhost:8000/get_global_shap")  # change if deployed
+        resp = requests.get(f"{API_URL}/get_global_shap", timeout=30)
         data = resp.json()
     except Exception as e:
-        st.error(f"❌ Could not fetch SHAP data: {e}")
-        return
+        st.error(f"❌ Could not connect to API: {e}")
+        st.stop()
 
     if "error" in data:
         st.warning(data["error"])
-        return
+        st.stop()
 
-    # --- Feature Importance (Bar Plot) ---
-    st.markdown("#### 🔥 Feature Importance (mean |SHAP|)")
-    fi_df = pd.DataFrame(data["feature_importance"])
+    # --- Feature Importance ---
+    fi_df = pd.DataFrame(data.get("feature_importance", []))
+    if fi_df.empty:
+        st.warning("⚠️ No SHAP feature importance available.")
+    else:
+        st.subheader("🔥 Feature Importance (mean |SHAP|)")
+        fig, ax = plt.subplots(figsize=(7, 3.5))   # compact size
+        fig.patch.set_alpha(0.0)          
+        ax.set_facecolor("none")
+        sns.barplot(
+            data=fi_df, x="importance", y="feature",
+            ax=ax, palette=["#FF6600"] * len(fi_df)
+        )
+        ax.set_xlabel("Mean |SHAP Value|", color="#888888")
+        ax.set_ylabel("Feature", color="#888888")
+        ax.tick_params(colors="#888888")
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        st.pyplot(fig, transparent=True)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    sns.barplot(
-        data=fi_df,
-        x="importance", y="feature",
-        ax=ax, palette=["#FF6600"] * len(fi_df)  # fire orange
-    )
-    ax.set_xlabel("Mean |SHAP Value|", color="#888888")
-    ax.set_ylabel("Feature", color="#888888")
-    ax.tick_params(colors="#888888")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#888888")
-    st.pyplot(fig)
+    st.markdown("---")
 
-    # --- Beeswarm Plot ---
-    st.markdown("#### 🐝 Beeswarm Distribution (SHAP effects)")
-    shap_sample = pd.DataFrame(data["shap_sample"])
+    # --- Beeswarm (Grey ↔ Orange Intensity) ---
+    shap_sample = pd.DataFrame(data.get("shap_sample", {}))
+    if shap_sample.empty:
+        st.warning("⚠️ No SHAP sample values available.")
+    else:
+        st.subheader("🐝 Beeswarm Distribution (SHAP effects)")
 
-    fig, ax = plt.subplots(figsize=(7, 5))
-    sns.stripplot(
-        data=shap_sample,
-        orient="h",
-        size=4,
-        palette=["#FF6600"],
-        alpha=0.6
-    )
-    ax.set_xlabel("SHAP Value (Impact on Productivity)", color="#888888")
-    ax.set_ylabel("Features", color="#888888")
-    ax.set_yticks(range(len(shap_sample.columns)))
-    ax.set_yticklabels(shap_sample.columns, color="#888888")
-    ax.tick_params(colors="#888888")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#888888")
-    st.pyplot(fig)
+        # Convert wide → long
+        flat_vals = shap_sample.melt(var_name="feature", value_name="shap_val")
+        flat_vals["abs_val"] = flat_vals["shap_val"].abs()
 
-    st.info("Orange → stronger influence. Values spread left/right → how each feature pushes productivity up/down.")
+        fig, ax = plt.subplots(figsize=(7, 3.5))   # compact size
+        fig.patch.set_alpha(0.0)          
+        ax.set_facecolor("none")
 
+        grey_orange = LinearSegmentedColormap.from_list("grey_orange", ["#888888", "#FF6600"])
+        sns.stripplot(
+            data=flat_vals,
+            x="shap_val", y="feature",
+            hue="abs_val",
+            palette=grey_orange,
+            size=4, alpha=0.7, ax=ax, dodge=False
+        )
+
+        ax.set_xlabel("SHAP Value (Impact on Productivity)", color="#888888")
+        ax.set_ylabel("Features", color="#888888")
+        ax.tick_params(colors="#888888")
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        ax.legend(title="Impact Strength", frameon=False, loc="upper right")
+        st.pyplot(fig, transparent=True)
+
+    st.info("🔥 Bar chart shows which habits matter most overall. 🐝 Beeswarm shows spread of effects, with grey = weaker impact and orange = stronger impact.")
