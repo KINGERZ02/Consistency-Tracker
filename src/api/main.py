@@ -113,43 +113,67 @@ def predict(habit: HabitLog):
 
 
 
-# --- Upload CSV (batch analysis) ---
+# --- Upload File (CSV or Excel) ---
 @app.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
     global uploaded_df
-    contents = await file.read()
-    import io
-    df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+    import io, os
 
-    # 1. Convert date → weekday
-    df["date"] = pd.to_datetime(df["date"])
+    try:
+        contents = await file.read()
+        ext = os.path.splitext(file.filename)[-1].lower()
+
+        # --- Handle CSV or Excel ---
+        if ext == ".csv":
+            df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+        elif ext in [".xlsx", ".xls"]:
+            df = pd.read_excel(io.BytesIO(contents))
+        else:
+            return {"error": "Unsupported file format. Please upload CSV or Excel."}
+    except Exception as e:
+        return {"error": f"❌ Could not read file: {e}"}
+
+    # --- Check for date column ---
+    if "date" not in df.columns:
+        return {"error": "File must include a 'date' column."}
+
+    # Convert date → weekday
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["weekday"] = df["date"].dt.day_name().astype("category").cat.codes
 
-    # 2. Features for prediction
+    # Required features
     feature_cols = ["leetcode","capstone","projects","misc",
                     "sleep_hours","sleep_quality","mood","stress",
                     "energy","weekday"]
 
-    # 3. Generate predictions
+    # Validate features
+    missing = [c for c in feature_cols if c not in df.columns]
+    if missing:
+        return {"error": f"File missing required columns: {missing}"}
+
+    # --- Generate predictions ---
     preds = model.predict(df[feature_cols])
-    df["predicted_productivity"] = preds.astype(float)  # ensure native floats
+    df["predicted_productivity"] = preds.astype(float)
 
-    # 4. Store for later endpoints
-    uploaded_df = df
-
-    # 5. Handle optional daily_productivity
+    # --- Decide what to use for 'daily_productivity' ---
     if "daily_productivity" in df.columns:
-        avg_actual = float(round(df["daily_productivity"].mean(), 2))
+        used_actuals = True
+        # Make sure it's numeric
+        df["daily_productivity"] = pd.to_numeric(df["daily_productivity"], errors="coerce")
     else:
-        avg_actual = None
+        used_actuals = False
+        df["daily_productivity"] = df["predicted_productivity"]
+
+    # Store globally
+    uploaded_df = df
 
     return {
         "filename": str(file.filename),
         "rows_loaded": int(len(df)),
-        "average_actual_productivity": avg_actual,
-        "average_predicted_productivity": float(round(df["predicted_productivity"].mean(), 2))
+        "average_actual_productivity": float(round(df["daily_productivity"].mean(), 2)),
+        "average_predicted_productivity": float(round(df["predicted_productivity"].mean(), 2)),
+        "used_actuals": used_actuals
     }
-
 
 
 @app.get("/get_summary")
