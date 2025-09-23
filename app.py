@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 # ---------------- DAILY LOG ----------------
 with tabs[0]:
-    st.header("Daily Productivity Prediction")
+    st.header("Daily Productivity")
 
     with st.form("daily_log_form"):
         # Binary tasks (0 or 1)
@@ -59,7 +59,7 @@ with tabs[0]:
 
                 # ---------------- Prediction Metric ----------------
                 prediction = result['predicted_productivity']
-                st.subheader("📊 Predicted Productivity")
+                st.subheader("Predicted Productivity")
                 cols = st.columns(1)
                 cols[0].metric("Score", round(prediction, 2))
 
@@ -67,7 +67,7 @@ with tabs[0]:
 
                 # ---------------- Motivational Insight ----------------
                 if result.get("insights"):
-                    st.subheader("💡 Coach's Insight")
+                    st.subheader("Coach's Insight")
                     for insight in result["insights"]:
                         st.info(insight)
 
@@ -75,7 +75,7 @@ with tabs[0]:
 
                 # ---------------- SHAP Feature Contributions ----------------
                 if result.get("shap_explanation"):
-                    st.subheader("🔥 Key Feature Contributions")
+                    st.subheader("Key Feature Contributions")
 
                     values = np.array(list(result["shap_explanation"].values()))
                     features = list(result["shap_explanation"].keys())
@@ -103,7 +103,7 @@ with tabs[0]:
 
                     # ---------------- Top 3 Drivers ----------------
                     top3 = shap_df.reindex(shap_df["contribution"].abs().sort_values(ascending=False).index).head(3)
-                    st.subheader("🏆 Today’s Key Drivers")
+                    st.subheader("Today’s Key Drivers")
                     for _, row in top3.iterrows():
                         sign = "⬆️ Boost" if row["contribution"] > 0 else "⬇️ Drag"
                         color = "#FF6600" if row["contribution"] > 0 else "#888888"
@@ -166,7 +166,7 @@ with tabs[1]:
 
             
             # --- Calendar Streak Tracker ---
-            st.subheader("🔥 Calendar Streak Tracker (last 3 months)")
+            st.subheader("Calendar Tracker")
             try:
                 uploaded_file.seek(0)
                 local_df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode("utf-8")))
@@ -228,7 +228,7 @@ with tabs[1]:
             st.markdown("---")
 
             # --- Daily Productivity Time Series ---
-            st.subheader("Daily Productivity (actual)")
+            st.subheader("Daily Productivity")
             if "daily_productivity" in local_df.columns and "date" in local_df.columns:
                 ts_df = local_df.sort_values("date")
                 fig, ax = plt.subplots(figsize=(10, 3))
@@ -245,7 +245,7 @@ with tabs[1]:
             st.markdown("---")
 
             # --- Weekly Actual vs Predicted ---
-            st.subheader("Weekly Averages (actual vs predicted)")
+            st.subheader("Weekly Averages")
             try:
                 w = requests.get(f"{API_URL}/get_weekly", timeout=20)
                 weekly_pred = w.json().get("weekly_average_productivity", {})
@@ -294,8 +294,8 @@ with tabs[1]:
                     current_streak, longest_streak = calculate_streaks(series, thr)
 
                     cols = st.columns(3)
-                    cols[0].metric("🔥 Current Streak", current_streak)
-                    cols[1].metric("🏆 Longest Streak", longest_streak)
+                    cols[0].metric("Current Streak", current_streak)
+                    cols[1].metric("Longest Streak", longest_streak)
                     cols[2].metric("Threshold", thr)
 
                     bool_series = (series >= thr).astype(int).reset_index(drop=True)
@@ -318,7 +318,7 @@ with tabs[2]:
     import seaborn as sns
     from matplotlib.colors import LinearSegmentedColormap
 
-    st.header("🌍 Global SHAP Insights")
+    st.header("Global SHAP Insights")
 
     # --- Fetch data from API ---
     try:
@@ -335,9 +335,9 @@ with tabs[2]:
     # --- Feature Importance ---
     fi_df = pd.DataFrame(data.get("feature_importance", []))
     if fi_df.empty:
-        st.warning("⚠️ No SHAP feature importance available.")
+        st.warning("No SHAP feature importance available.")
     else:
-        st.subheader("🔥 Feature Importance (mean |SHAP|)")
+        st.subheader("Feature Importance")
         fig, ax = plt.subplots(figsize=(7, 3.5))   # compact size
         fig.patch.set_alpha(0.0)          
         ax.set_facecolor("none")
@@ -357,9 +357,9 @@ with tabs[2]:
     # --- Beeswarm (Grey ↔ Orange Intensity) ---
     shap_sample = pd.DataFrame(data.get("shap_sample", {}))
     if shap_sample.empty:
-        st.warning("⚠️ No SHAP sample values available.")
+        st.warning(" No SHAP sample values available.")
     else:
-        st.subheader("🐝 Beeswarm Distribution (SHAP effects)")
+        st.subheader("SHAP effects")
 
         # Convert wide → long
         flat_vals = shap_sample.melt(var_name="feature", value_name="shap_val")

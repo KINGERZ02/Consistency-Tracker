@@ -57,13 +57,15 @@ def healthcheck():
 
 
 # --- Predict (daily log) ---
+# --- Predict (daily log) ---
 @app.post("/predict")
 def predict(habit: HabitLog):
     input_data = habit.dict()
     df_input = pd.DataFrame([input_data])
 
-    # Make prediction
+    # Make prediction and clamp to [0, 10]
     prediction = model.predict(df_input)[0]
+    prediction = float(np.clip(prediction, 0, 10))
 
     # Check if no work was done
     no_work = all(input_data[task] == 0 for task in ["leetcode", "capstone", "projects", "misc"])
@@ -75,40 +77,23 @@ def predict(habit: HabitLog):
     insights = []
 
     if no_work:
-        # Special motivational case for no work
         insights.append(
             "You didn’t complete any tasks today, so productivity stayed minimal. "
             "But you managed good sleep and energy!! that’s a strong base. "
             "Tomorrow, try adding even one task to keep the momentum going."
         )
     else:
-        # Normal SHAP-based reflection + motivation
-        feature_directions = {
-            "sleep_hours": "higher is better",
-            "sleep_quality": "higher is better",
-            "energy": "higher is better",
-            "mood": "higher is better",
-            "leetcode": "higher is better",
-            "capstone": "higher is better",
-            "projects": "higher is better",
-            "misc": "higher is better",
-            "stress": "lower is better"
-        }
-
         sorted_contribs = sorted(feature_contribs.items(), key=lambda x: abs(x[1]), reverse=True)
         top_factors = sorted_contribs[:3]
 
         positives, negatives = [], []
         for feat, val in top_factors:
-            direction = feature_directions.get(feat, "higher is better")
             feat_name = feat.replace("_", " ")
-
-            if (val > 0 and direction == "higher is better") or (val < 0 and direction == "lower is better"):
+            if val > 0:
                 positives.append(feat_name)
             else:
                 negatives.append(feat_name)
 
-        # Build motivational sentence
         sentence = ""
         if positives:
             sentence += "Great job!! " + " and ".join(positives) + " boosted your productivity today. "
@@ -121,10 +106,11 @@ def predict(habit: HabitLog):
         insights.append(sentence.strip())
 
     return {
-        "predicted_productivity": float(prediction),
+        "predicted_productivity": prediction,
         "shap_explanation": feature_contribs,
         "insights": insights
     }
+
 
 
 # --- Upload CSV (batch analysis) ---
@@ -151,10 +137,16 @@ async def upload_csv(file: UploadFile = File(...)):
     # 4. Store for later endpoints
     uploaded_df = df
 
+    # 5. Handle optional daily_productivity
+    if "daily_productivity" in df.columns:
+        avg_actual = float(round(df["daily_productivity"].mean(), 2))
+    else:
+        avg_actual = None
+
     return {
         "filename": str(file.filename),
         "rows_loaded": int(len(df)),
-        "average_actual_productivity": float(round(df["daily_productivity"].mean(), 2)),
+        "average_actual_productivity": avg_actual,
         "average_predicted_productivity": float(round(df["predicted_productivity"].mean(), 2))
     }
 
