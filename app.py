@@ -6,7 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://consistency-tracker-fastapi.onrender.com"
+
 
 st.set_page_config(page_title="Consistency Tracker", layout="wide")
 st.title("🔥Consistency Tracker")
@@ -164,7 +165,6 @@ with tabs[1]:
         else:
             upload_info = resp.json()
 
-            
             # --- Calendar Streak Tracker ---
             st.subheader("Calendar Tracker")
             try:
@@ -173,38 +173,45 @@ with tabs[1]:
                 if "date" in local_df.columns:
                     local_df["date"] = pd.to_datetime(local_df["date"], errors="coerce")
                 if "daily_productivity" in local_df.columns:
-                    prod_series = local_df.set_index("date")["daily_productivity"]
+                    prod_series = local_df.set_index("date")["daily_productivity"].sort_index()
+
                     last_date = prod_series.index.max()
                     three_months_back = last_date - pd.DateOffset(months=3)
                     prod_series = prod_series[prod_series.index >= three_months_back]
 
-                    fig, axes = calplot.calplot(
-                        prod_series,
-                        cmap="Oranges",
-                        edgecolor="#888888",
-                        colorbar=True,
-                        linewidth=0.5,
-                        fillcolor="black"  # blank days = black
-                    )
+                    # Ensure no NaNs / broken index
+                    prod_series = prod_series.dropna()
 
-                    # Recolor all text/ticks grey
-                    if isinstance(axes, np.ndarray):
-                        axs = axes.flatten()
+                    if not prod_series.empty:
+                        fig, axes = calplot.calplot(
+                            prod_series,
+                            cmap="Oranges",
+                            edgecolor="#888888",
+                            colorbar=True,
+                            linewidth=0.5,
+                            fillcolor="black"  # blank days = black
+                        )
+
+                        # Recolor all text/ticks grey
+                        if isinstance(axes, np.ndarray):
+                            axs = axes.flatten()
+                        else:
+                            axs = [axes]
+                        for ax in axs:
+                            for text in ax.texts:
+                                text.set_color("#888888")
+                            ax.tick_params(colors="#888888")
+                            if ax.yaxis.label: ax.yaxis.label.set_color("#888888")
+                            if ax.xaxis.label: ax.xaxis.label.set_color("#888888")
+                        if fig.axes:
+                            for a in fig.axes:
+                                a.tick_params(colors="#888888")
+                                if a.yaxis.label: a.yaxis.label.set_color("#888888")
+                                if a.xaxis.label: a.xaxis.label.set_color("#888888")
+
+                        st.pyplot(fig, transparent=True)
                     else:
-                        axs = [axes]
-                    for ax in axs:
-                        for text in ax.texts:
-                            text.set_color("#888888")
-                        ax.tick_params(colors="#888888")
-                        if ax.yaxis.label: ax.yaxis.label.set_color("#888888")
-                        if ax.xaxis.label: ax.xaxis.label.set_color("#888888")
-                    if fig.axes:
-                        for a in fig.axes:
-                            a.tick_params(colors="#888888")
-                            if a.yaxis.label: a.yaxis.label.set_color("#888888")
-                            if a.xaxis.label: a.xaxis.label.set_color("#888888")
-
-                    st.pyplot(fig, transparent=True)
+                        st.warning("⚠️ No productivity data available for the last 3 months.")
             except Exception as e:
                 st.warning(f"Could not generate calendar: {e}")
 
@@ -311,6 +318,7 @@ with tabs[1]:
                     st.pyplot(fig, transparent=True)
             except Exception as e:
                 st.warning(f"Could not compute streaks: {e}")
+
 
 # ---------------- GLOBAL SHAP ----------------
 with tabs[2]:
